@@ -4,6 +4,8 @@
 - `migrations/0001_schema.sql` tables, constraints, indexes, audit trigger
 - `migrations/0002_functions_views.sql` admin RPCs, `public_lookup`, `record_scan`, metrics, map, views
 - `migrations/0003_rls_grants.sql` RLS policies and least-privilege grants
+- `migrations/0004_scan_place_fields.sql` reverse-geocoded place columns on `scan_events`, updated `record_scan` / `map_points`
+- `migrations/0005_product_overview_place.sql` last-scan place labels on `product_overview`
 - `functions/track-lookup`, `functions/track-scan` the only public (unauthenticated) endpoints
 - `tests/` SQL integration tests (RLS, tokens, scans, rules) and `run.sh`; Deno tests live in `functions/_shared/`
 
@@ -48,6 +50,7 @@ Boundaries use `app_settings.timezone` (default `Asia/Kolkata`). See the comment
 - `batches` table skipped for Phase 1: `batch_number` on `products` is enough.
 - No-GPS scans are recorded by default (`allow_scan_without_gps = true`), clearly marked by `location_status`. Set it to false to require GPS.
 - Idempotency: client sends a UUID per scan attempt and reuses it on retry.
+- Place names: `track-scan` reverse-geocodes lat/lon via OpenStreetMap Nominatim (no API key) before insert, storing `location_area` / `location_city` / `location_state` / `location_country`. Lookup failures are soft: the scan still saves with coordinates only. Place labels survive `purge_old_locations()` after precise coords are cleared. Swap the helper in `functions/_shared/geocode.ts` if you later prefer a paid provider.
 
 ## Known limitations
 - Browser GPS can be inaccurate or spoofed; a QR URL can be copied. A scan means "a device that had this URL reported this location", not authentication of the physical item.

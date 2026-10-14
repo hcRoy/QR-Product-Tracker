@@ -11,6 +11,7 @@ export interface ProductRow {
   status: "active" | "archived"; created_at: string; updated_at: string;
   unit_count: number; scanned_units: number; is_expired: boolean;
   last_scan_at: string | null; last_scan_lat: number | null; last_scan_lon: number | null; last_scan_accuracy_m: number | null;
+  last_scan_area: string | null; last_scan_city: string | null; last_scan_state: string | null; last_scan_country: string | null;
 }
 export interface UnitRow {
   id: string; serial: number; token: string; status: "active" | "revoked";
@@ -19,6 +20,7 @@ export interface UnitRow {
 export interface ScanRow {
   id: string; scanned_at: string; latitude: number | null; longitude: number | null; accuracy_m: number | null;
   location_status: string; flags: string[]; vendor_reference: string | null;
+  location_area: string | null; location_city: string | null; location_state: string | null; location_country: string | null;
   product_units: { serial: number; product_id: string; products: { name: string; batch_number: string | null } };
 }
 export interface Metrics {
@@ -29,6 +31,7 @@ export interface Metrics {
 export interface MapPoint {
   scan_id: string; unit_id: string; product_id: string; product_name: string; batch_number: string | null;
   unit_label: string; scanned_at: string; latitude: number; longitude: number; accuracy_m: number | null; flags: string[];
+  location_area: string | null; location_city: string | null; location_state: string | null; location_country: string | null;
 }
 export interface Settings {
   timezone: string; allow_scan_without_gps: boolean; max_accuracy_m: number; min_rescan_seconds: number;
@@ -93,7 +96,10 @@ export const rotateToken = async (unitId: string, reason: string) => check(await
 export const revokeUnit = async (unitId: string, reason: string) => check(await supabase.rpc("revoke_unit", { p_unit: unitId, p_reason: reason || null }));
 
 // ---------------- scans ----------------
-const SCAN_SELECT = "id,scanned_at,latitude,longitude,accuracy_m,location_status,flags,vendor_reference,product_units!inner(serial,product_id,products(name,batch_number))";
+// Hint unit_id: PostgREST sees two FKs between scan_events and product_units
+// (scan_events.unit_id → product_units, and product_units.last_scan_id → scan_events).
+const SCAN_SELECT =
+  "id,scanned_at,latitude,longitude,accuracy_m,location_status,flags,vendor_reference,location_area,location_city,location_state,location_country,product_units!unit_id!inner(serial,product_id,products(name,batch_number))";
 export interface ScanQuery { page: number; pageSize: number; productId?: string; flaggedOnly?: boolean; from?: string; to?: string }
 export async function listScans(q: ScanQuery) {
   let query = supabase.from("scan_events").select(SCAN_SELECT, { count: "exact" });

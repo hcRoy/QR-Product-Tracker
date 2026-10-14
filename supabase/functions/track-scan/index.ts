@@ -2,6 +2,7 @@
 // The server sets the timestamp; product/unit identity is derived from the token only.
 import { admin, fingerprint, handle, hashIp, json, rateLimited } from "../_shared/http.ts";
 import { scanSchema } from "../_shared/schemas.ts";
+import { EMPTY_PLACE, reverseGeocode } from "../_shared/geocode.ts";
 
 const REASON_STATUS: Record<string, number> = {
   invalid_input: 400, invalid_token: 404, revoked: 410, unavailable: 410, location_required: 422,
@@ -18,6 +19,12 @@ Deno.serve(handle("track-scan", async (req, body) => {
   if (await rateLimited(`scan:ip:${ipHash}`, 20) || await rateLimited(`scan:tok:${await fingerprint(v.token)}`, 15)) {
     return json(req, 429, { error: "rate_limited" }, { "Retry-After": "60" });
   }
+
+  // Reverse-geocode before insert (scan_events is append-only). Soft-fail keeps the scan.
+  const place = v.locationStatus === "granted" && v.location
+    ? await reverseGeocode(v.location.latitude, v.location.longitude)
+    : EMPTY_PLACE;
+
   const { data, error } = await admin.rpc("record_scan", {
     p_token: v.token,
     p_idem: v.idempotencyKey,
@@ -29,6 +36,10 @@ Deno.serve(handle("track-scan", async (req, body) => {
     p_vendor_ref: v.vendorReference ?? null,
     p_ip_hash: ipHash,
     p_ua: req.headers.get("user-agent"),
+    p_area: place.area,
+    p_city: place.city,
+    p_state: place.state,
+    p_country: place.country,
   });
   if (error) throw error;
 

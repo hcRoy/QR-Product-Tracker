@@ -128,11 +128,15 @@ begin
   select token into tok from public.product_units where serial = 1;
   set local role service_role;
 
-  r := public.record_scan(tok, idem, 21.170240, 72.831062, 25, 'granted', now(), ' WH-7 ', 'iph', 'UA');
+  r := public.record_scan(tok, idem, 21.170240, 72.831062, 25, 'granted', now(), ' WH-7 ', 'iph', 'UA',
+                          'Adajan', 'Surat', 'Gujarat', 'India');
   perform t.ok(r ->> 'result' = 'accepted' and (r ->> 'location_recorded')::boolean, 'scan with GPS accepted');
   perform t.ok((select count(*) from public.scan_events) = 1, 'scan row created');
   perform t.ok((select latitude = 21.170240 and vendor_reference = 'WH-7' and flags = '{}' from public.scan_events),
                'coordinates stored, vendor reference trimmed, no flags on first scan');
+  perform t.ok((select location_area = 'Adajan' and location_city = 'Surat'
+                         and location_state = 'Gujarat' and location_country = 'India' from public.scan_events),
+               'reverse-geocoded place fields stored with GPS scan');
   perform t.ok((select scan_count = 1 and last_scan_id is not null from public.product_units where serial = 1),
                'unit scan summary updated');
 
@@ -140,11 +144,14 @@ begin
   perform t.ok((r ->> 'replayed')::boolean and (select count(*) from public.scan_events) = 1,
                'retry with same idempotency key does not create a duplicate');
 
-  r := public.record_scan(tok, gen_random_uuid(), null, null, null, 'denied', null, null, 'iph', 'UA');
+  r := public.record_scan(tok, gen_random_uuid(), null, null, null, 'denied', null, null, 'iph', 'UA',
+                          'Should', 'Be', 'Cleared', 'Away');
   perform t.ok(r ->> 'result' = 'accepted' and not (r ->> 'location_recorded')::boolean, 'scan without GPS is accepted and marked as no-location');
   perform t.ok((select latitude is null and location_status = 'denied' and 'rapid_repeat' = any(flags)
+                         and location_area is null and location_city is null
+                         and location_state is null and location_country is null
                   from public.scan_events where id = (r ->> 'scan_id')::uuid),
-               'no-GPS scan has null coordinates and rapid_repeat flag');
+               'no-GPS scan has null coordinates, null place fields, and rapid_repeat flag');
 
   r := public.record_scan(tok, gen_random_uuid(), 95, 72.8, 10, 'granted', now(), null, 'iph', 'UA');
   perform t.ok(r ->> 'reason' = 'invalid_input', 'latitude 95 rejected');
@@ -291,7 +298,7 @@ begin
   perform t.fails('select public.purge_old_locations()', 'admin cannot call the purge job directly');
   reset role;
 
-  select id into rid from public.scan_events where latitude is not null limit 1;
+  select id into rid from public.scan_events where location_city = 'Surat' and latitude is not null limit 1;
   perform set_config('app.scan_maintenance', 'on', true);
   update public.scan_events set scanned_at = now() - interval '400 days' where id = rid;
   perform set_config('app.scan_maintenance', 'off', true);
@@ -300,7 +307,9 @@ begin
   reset role;
   perform t.ok(n = 1, 'purge removed coordinates from exactly the expired event');
   perform t.ok((select latitude is null and location_purged_at is not null and location_status = 'granted'
-                  from public.scan_events where id = rid), 'purged event keeps its record but loses coordinates');
+                         and location_city = 'Surat' and location_country = 'India'
+                  from public.scan_events where id = rid),
+               'purged event keeps its record and place labels but loses coordinates');
 
   set local role service_role;
   perform t.ok(public.check_rate_limit('k1', 3, 60) and public.check_rate_limit('k1', 3, 60)

@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import L from "leaflet";
 import { getMapPoints, listProducts, type MapPoint } from "../lib/api";
-import { FLAG_LABELS, SUSPICIOUS_FLAGS, fmtCoords, fmtDateTime } from "../lib/format";
+import { FLAG_LABELS, SUSPICIOUS_FLAGS, fmtCoords, fmtDateTime, fmtPlace } from "../lib/format";
 import { Badge, Card, ErrorState, Input, PageHeader, Select } from "../components/ui";
 
 export default function MapPage() {
@@ -20,7 +20,12 @@ export default function MapPage() {
   useEffect(() => {
     if (!el.current || map.current) return;
     map.current = L.map(el.current).setView([21.17, 72.83], 5);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(map.current);
+    // Do not use tile.openstreetmap.org — OSM blocks hotlinking that violates their tile usage policy.
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+      maxZoom: 20,
+      subdomains: "abcd",
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    }).addTo(map.current);
     layer.current = L.layerGroup().addTo(map.current);
     return () => { map.current?.remove(); map.current = null; };
   }, []);
@@ -62,6 +67,7 @@ export default function MapPage() {
               <p className="font-mono text-xs">{sel.unit_label}</p>
               {sel.batch_number && <p>Batch {sel.batch_number}</p>}
               <p>{fmtDateTime(sel.scanned_at)}</p>
+              {fmtPlace(sel) ? <p>{fmtPlace(sel)}</p> : null}
               <p className="font-mono text-xs">{fmtCoords(sel.latitude, sel.longitude)} · ±{Math.round(sel.accuracy_m ?? 0)} m</p>
               <div className="flex flex-wrap gap-1">{sel.flags.map((x) => <Badge key={x} tone={SUSPICIOUS_FLAGS.includes(x) ? "red" : "amber"}>{FLAG_LABELS[x] ?? x}</Badge>)}</div>
               <Link className="inline-block pt-2 text-brand underline" to={`/products/${sel.product_id}`}>Open product</Link>

@@ -4,6 +4,11 @@ export const fmtDate = (s?: string | null) =>
   s ? new Date(s + (s.length === 10 ? "T00:00:00" : "")).toLocaleDateString(undefined, { dateStyle: "medium" }) : "—";
 export const fmtCoords = (lat?: number | null, lon?: number | null) =>
   lat == null || lon == null ? "Not available" : `${Number(lat).toFixed(5)}, ${Number(lon).toFixed(5)}`;
+/** Joins non-empty place parts: area, city, state, country. */
+export const fmtPlace = (p: {
+  location_area?: string | null; location_city?: string | null;
+  location_state?: string | null; location_country?: string | null;
+}) => [p.location_area, p.location_city, p.location_state, p.location_country].filter(Boolean).join(", ") || null;
 export const fmtMoney = (v?: number | null, cur = "INR") =>
   v == null ? "—" : new Intl.NumberFormat(undefined, { style: "currency", currency: cur }).format(v);
 export const FLAG_LABELS: Record<string, string> = {

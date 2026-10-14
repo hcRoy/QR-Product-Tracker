@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { listCategories, listProducts, setProductStatus, type ProductRow } from "../lib/api";
-import { fmtCoords, fmtDate, fmtDateTime, fmtMoney } from "../lib/format";
+import { fmtCoords, fmtDate, fmtDateTime, fmtMoney, fmtPlace } from "../lib/format";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, PageHeader, Pager, Select, TableSkeleton } from "../components/ui";
 import { ConfirmDialog } from "../components/Dialog";
 
@@ -57,7 +57,10 @@ export default function Products() {
                     <td className="px-4 py-3"><Badge tone={p.status === "active" ? "green" : "slate"}>{p.status}</Badge></td>
                     <td className="px-4 py-3">{p.unit_count > 0 ? <Badge tone="blue">{p.unit_count} generated</Badge> : <Badge tone="amber">None</Badge>}</td>
                     <td className="whitespace-nowrap px-4 py-3">{p.last_scan_at ? fmtDateTime(p.last_scan_at) : <Badge>Never scanned</Badge>}</td>
-                    <td className="px-4 py-3 text-xs">{p.last_scan_at ? fmtCoords(p.last_scan_lat, p.last_scan_lon) : "—"}</td>
+                    <td className="px-4 py-3 text-xs">{p.last_scan_at
+                      ? (fmtPlace({ location_area: p.last_scan_area, location_city: p.last_scan_city, location_state: p.last_scan_state, location_country: p.last_scan_country })
+                        ?? fmtCoords(p.last_scan_lat, p.last_scan_lon))
+                      : "—"}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-xs">{fmtDate(p.created_at)}</td>
                     <td className="whitespace-nowrap px-4 py-3 text-right text-xs">
                       <Link className="text-brand hover:underline" to={`/products/${p.id}`}>View</Link> ·{" "}

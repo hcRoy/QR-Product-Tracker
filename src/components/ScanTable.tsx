@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { ScanRow } from "../lib/api";
-import { FLAG_LABELS, SUSPICIOUS_FLAGS, fmtCoords, fmtDateTime } from "../lib/format";
+import { FLAG_LABELS, SUSPICIOUS_FLAGS, fmtCoords, fmtDateTime, fmtPlace } from "../lib/format";
 import { Badge } from "./ui";
 
 export function FlagBadges({ flags }: { flags: string[] }) {
@@ -8,9 +8,27 @@ export function FlagBadges({ flags }: { flags: string[] }) {
   return <div className="flex flex-wrap gap-1">{flags.map((f) => <Badge key={f} tone={SUSPICIOUS_FLAGS.includes(f) ? "red" : "amber"}>{FLAG_LABELS[f] ?? f}</Badge>)}</div>;
 }
 
-export function LocationCell({ r }: { r: Pick<ScanRow, "latitude" | "longitude" | "accuracy_m" | "location_status"> }) {
-  if (r.latitude == null) return <Badge tone="slate">{r.location_status === "granted" ? "Coordinates purged" : `No GPS (${r.location_status})`}</Badge>;
-  return <span>{fmtCoords(r.latitude, r.longitude)}<span className="block text-xs text-slate-500">±{Math.round(r.accuracy_m ?? 0)} m</span></span>;
+export function LocationCell({ r }: { r: Pick<ScanRow, "latitude" | "longitude" | "accuracy_m" | "location_status" | "location_area" | "location_city" | "location_state" | "location_country"> }) {
+  const place = fmtPlace(r);
+  if (r.latitude == null) {
+    if (place) {
+      return (
+        <span>
+          <span className="block font-medium text-slate-800">{place}</span>
+          <span className="block text-xs text-slate-500">{r.location_status === "granted" ? "Coordinates purged" : `No GPS (${r.location_status})`}</span>
+        </span>
+      );
+    }
+    return <Badge tone="slate">{r.location_status === "granted" ? "Coordinates purged" : `No GPS (${r.location_status})`}</Badge>;
+  }
+  return (
+    <span>
+      {place
+        ? <span className="block font-medium text-slate-800">{place}</span>
+        : <span className="block text-xs text-amber-700">Place name not recorded</span>}
+      <span className="block text-xs text-slate-500">{fmtCoords(r.latitude, r.longitude)} · ±{Math.round(r.accuracy_m ?? 0)} m</span>
+    </span>
+  );
 }
 
 export function ScanTable({ rows, showProduct = true }: { rows: ScanRow[]; showProduct?: boolean }) {

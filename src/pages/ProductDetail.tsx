@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addUnits, getProduct, listProducts, listScans, listUnits, revokeUnit, rotateToken, setProductStatus, type UnitRow } from "../lib/api";
 import { downloadDataUrl, downloadText, printLabels, qrPngDataUrl, qrSvg, trackingUrl } from "../lib/qr";
-import { fmtCoords, fmtDate, fmtDateTime, fmtMoney } from "../lib/format";
+import { fmtCoords, fmtDate, fmtDateTime, fmtMoney, fmtPlace } from "../lib/format";
 import { Badge, Button, Card, ErrorState, Input, PageHeader, Pager, Skeleton, TableSkeleton } from "../components/ui";
 import { ConfirmDialog, Dialog } from "../components/Dialog";
 import { FlagBadges, ScanTable } from "../components/ScanTable";
@@ -58,6 +58,10 @@ export default function ProductDetail() {
   if (p.isLoading) return <Skeleton className="h-96" />;
   if (p.isError) return <ErrorState error={p.error} retry={() => p.refetch()} />;
   const d = p.data!;
+  const lastPlace = fmtPlace({
+    location_area: d.last_scan_area, location_city: d.last_scan_city,
+    location_state: d.last_scan_state, location_country: d.last_scan_country,
+  });
   const firstUnit = units.data?.rows[0];
   const n = Number(extra);
 
@@ -99,8 +103,9 @@ export default function ProductDetail() {
           {d.last_scan_at ? (
             <div className="space-y-1 text-sm">
               <p>{fmtDateTime(d.last_scan_at)}</p>
-              <p className="font-mono">{fmtCoords(d.last_scan_lat, d.last_scan_lon)}</p>
-              {d.last_scan_accuracy_m != null && <p className="text-slate-500">Accuracy ±{Math.round(d.last_scan_accuracy_m)} m</p>}
+              {lastPlace && <p className="font-medium text-slate-800">{lastPlace}</p>}
+              <p className="font-mono text-xs text-slate-500">{fmtCoords(d.last_scan_lat, d.last_scan_lon)}
+                {d.last_scan_accuracy_m != null ? ` · ±${Math.round(d.last_scan_accuracy_m)} m` : ""}</p>
             </div>) : <p className="text-sm text-slate-500">Never scanned.</p>}
           <p className="mt-3 text-xs text-slate-500">Reported by a device at scan time. It is not a verified handover or a confirmed inventory location.</p>
           <p className="mt-3 text-sm">{d.scanned_units} of {d.unit_count} units scanned</p>

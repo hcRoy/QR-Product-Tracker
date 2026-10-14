@@ -14,15 +14,15 @@ export default function Reports() {
   };
   const products = run("products", async () => {
     const rows = await exportProducts();
-    downloadText(toCsv([["Name", "SKU", "Batch", "Category", "Mfg date", "Expiry date", "Price", "Currency", "Status", "Units", "Units scanned", "Last scan", "Last lat", "Last lon"],
-      ...rows.map((r) => [r.name, r.sku, r.batch_number, r.category, r.manufacturing_date, r.expiry_date, r.unit_price, r.currency, r.status, r.unit_count, r.scanned_units, r.last_scan_at, r.last_scan_lat, r.last_scan_lon])]),
+    downloadText(toCsv([["Name", "SKU", "Batch", "Category", "Mfg date", "Expiry date", "Price", "Currency", "Status", "Units", "Units scanned", "Last scan", "Last area", "Last city", "Last state", "Last country", "Last lat", "Last lon"],
+      ...rows.map((r) => [r.name, r.sku, r.batch_number, r.category, r.manufacturing_date, r.expiry_date, r.unit_price, r.currency, r.status, r.unit_count, r.scanned_units, r.last_scan_at, r.last_scan_area, r.last_scan_city, r.last_scan_state, r.last_scan_country, r.last_scan_lat, r.last_scan_lon])]),
       "products.csv", "text/csv");
   });
   const scans = run("scans", async () => {
-    const out: unknown[][] = [["Scanned at (UTC)", "Product", "Batch", "Unit #", "Latitude", "Longitude", "Accuracy m", "Location status", "Vendor ref", "Flags"]];
+    const out: unknown[][] = [["Scanned at (UTC)", "Product", "Batch", "Unit #", "Area", "City", "State", "Country", "Latitude", "Longitude", "Accuracy m", "Location status", "Vendor ref", "Flags"]];
     for (let page = 1; page <= 5; page++) { // 5 x 1000 = 5000 rows max per export
       const { rows, total } = await listScans({ page, pageSize: 1000, from, to });
-      rows.forEach((r) => out.push([r.scanned_at, r.product_units.products.name, r.product_units.products.batch_number, r.product_units.serial, r.latitude, r.longitude, r.accuracy_m, r.location_status, r.vendor_reference, r.flags.join(" ")]));
+      rows.forEach((r) => out.push([r.scanned_at, r.product_units.products.name, r.product_units.products.batch_number, r.product_units.serial, r.location_area, r.location_city, r.location_state, r.location_country, r.latitude, r.longitude, r.accuracy_m, r.location_status, r.vendor_reference, r.flags.join(" ")]));
       if (page * 1000 >= total) break;
     }
     downloadText(toCsv(out), "scans.csv", "text/csv");

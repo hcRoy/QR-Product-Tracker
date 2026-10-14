@@ -3,7 +3,7 @@ import { emptyProductForm, productSchema, toProductPayload, loginSchema } from "
 import { TOKEN_RE, trackingUrl } from "./qr";
 import { makeKeyTracker, mapGeoError, payloadSig } from "./geo";
 import { csvCell, toCsv } from "./csv";
-import { safeSearch } from "./format";
+import { fmtPlace, safeSearch } from "./format";
 
 const valid = { ...emptyProductForm, name: "Tea", batch_number: "B1", unit_count: "3" };
 const bad = (over: object) => productSchema.safeParse({ ...valid, ...over });
@@ -72,4 +72,13 @@ describe("csv export safety", () => {
 
 describe("search sanitising", () => {
   it("strips characters that alter PostgREST filter syntax", () => expect(safeSearch("a,b)(c%d")).toBe("a b  c d"));
+});
+
+describe("place formatting", () => {
+  it("joins non-empty parts and returns null when empty", () => {
+    expect(fmtPlace({ location_area: "Adajan", location_city: "Surat", location_state: "Gujarat", location_country: "India" }))
+      .toBe("Adajan, Surat, Gujarat, India");
+    expect(fmtPlace({ location_city: "Surat", location_country: "India" })).toBe("Surat, India");
+    expect(fmtPlace({})).toBeNull();
+  });
 });

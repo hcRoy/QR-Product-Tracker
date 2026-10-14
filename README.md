@@ -46,8 +46,9 @@ or leaked, use **Replace token** and reprint: the old code stops working and lat
 Admin: login, dashboard (metrics, 30-day activity, status split, recent/suspicious scans, empty onboarding state),
 products (server-side search/filter/pagination, create/edit/archive/restore), unit QR (PNG, SVG, print, add units, replace/revoke
 token with audit reason), product detail with last reported location, scan history (all / suspicious / rejected attempts),
-location map (filters, accuracy circles, detail panel), CSV reports, settings (rule thresholds, retention, time zone).
+location map (CARTO basemap tiles — not OSM’s blocked public tile servers; filters, accuracy circles, detail panel), CSV reports, settings (rule thresholds, retention, time zone).
 Vendor: mobile scan page with consent explanation, optional business reference, permission/timeout/offline/revoked states, safe retry.
+Scan locations store GPS plus reverse-geocoded area/city/state/country (Nominatim, server-side at scan time).
 
 ## Known limitations and not done
 - Not verified against a live Supabase project or on real phones; end-to-end (browser) tests are not written. Smoke-test after deploying.
