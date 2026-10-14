@@ -1,0 +1,11 @@
+@import "tailwindcss";
+@import "leaflet/dist/leaflet.css";
+
+@theme {
+  --color-brand: #203562;
+  --color-brand-600: #2b4580;
+  --color-accent: #e3e8f8;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+body { @apply bg-slate-50 text-slate-900 antialiased; }
+:focus-visible { outline: 2px solid var(--color-brand); outline-offset: 2px; }

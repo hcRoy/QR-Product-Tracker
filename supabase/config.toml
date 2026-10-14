@@ -1,0 +1,7 @@
+# Public tracking endpoints are called by unauthenticated vendors, so JWT verification is off.
+# They are protected by token validation, input validation and rate limiting instead.
+[functions.track-lookup]
+verify_jwt = false
+
+[functions.track-scan]
+verify_jwt = false
