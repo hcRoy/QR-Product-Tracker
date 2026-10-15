@@ -12,9 +12,11 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
+    "@maplibre/maplibre-gl-leaflet": "^0.1.4",
     "@supabase/supabase-js": "^2.117.3",
     "@tanstack/react-query": "^5.104.2",
     "leaflet": "^1.9.4",
+    "maplibre-gl": "^6.14.0",
     "qrcode": "^1.5.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",

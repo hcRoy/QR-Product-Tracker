@@ -6,6 +6,7 @@
 - `migrations/0003_rls_grants.sql` RLS policies and least-privilege grants
 - `migrations/0004_scan_place_fields.sql` reverse-geocoded place columns on `scan_events`, updated `record_scan` / `map_points`
 - `migrations/0005_product_overview_place.sql` last-scan place labels on `product_overview`
+- `migrations/0006_set_scan_place.sql` write-once `set_scan_place()` used to fill place labels after a scan is saved
 - `functions/track-lookup`, `functions/track-scan` the only public (unauthenticated) endpoints
 - `tests/` SQL integration tests (RLS, tokens, scans, rules) and `run.sh`; Deno tests live in `functions/_shared/`
 
@@ -15,6 +16,7 @@
    `update public.profiles set role = 'admin' where id = '<auth user id>';`
    (New sign-ups are always `viewer`; there is no self-service path to admin.)
 3. Set function secrets: `supabase secrets set ALLOWED_ORIGINS=https://your-domain.com IP_HASH_SECRET=$(openssl rand -hex 32)`
+   For place names also set `GEOCODE_CONTACT_EMAIL=you@your-domain.com` and (recommended) `LOCATIONIQ_API_KEY=<free token from locationiq.com>`.
 4. Deploy: `supabase functions deploy track-lookup track-scan` (`config.toml` sets `verify_jwt = false` for both).
 5. Optional retention job (pg_cron): `select cron.schedule('purge-locations', '17 3 * * *', 'select public.purge_old_locations()');`
 
@@ -50,7 +52,7 @@ Boundaries use `app_settings.timezone` (default `Asia/Kolkata`). See the comment
 - `batches` table skipped for Phase 1: `batch_number` on `products` is enough.
 - No-GPS scans are recorded by default (`allow_scan_without_gps = true`), clearly marked by `location_status`. Set it to false to require GPS.
 - Idempotency: client sends a UUID per scan attempt and reuses it on retry.
-- Place names: `track-scan` reverse-geocodes lat/lon via OpenStreetMap Nominatim (no API key) before insert, storing `location_area` / `location_city` / `location_state` / `location_country`. Lookup failures are soft: the scan still saves with coordinates only. Place labels survive `purge_old_locations()` after precise coords are cleared. Swap the helper in `functions/_shared/geocode.ts` if you later prefer a paid provider.
+- Place names: after a GPS scan is saved, `track-scan` reverse-geocodes in the background (`EdgeRuntime.waitUntil`) and fills `location_area` / `location_city` / `location_state` / `location_country` through the write-once `set_scan_place()`. Provider order: LocationIQ (if `LOCATIONIQ_API_KEY` is set), then public Nominatim. Public Nominatim may throttle or block requests from shared cloud servers, so a LocationIQ key is recommended for production. Failures are logged as `geocode_failed` with reasons such as `nominatim:http_403` (no coordinates in logs) and never affect the scan. Fill older scans with `node --env-file=.env.backfill scripts/backfill-places.mjs`. Place labels survive `purge_old_locations()`.
 
 ## Known limitations
 - Browser GPS can be inaccurate or spoofed; a QR URL can be copied. A scan means "a device that had this URL reported this location", not authentication of the physical item.

@@ -3,7 +3,7 @@
 Register products, generate one unique QR code per physical unit, let vendors scan with a phone browser (no app),
 record the reported GPS location, and review everything in an admin dashboard.
 
-Stack: Vite + React + TypeScript, Tailwind, TanStack Query, React Hook Form + Zod, Leaflet/OpenStreetMap,
+Stack: Vite + React + TypeScript, Tailwind, TanStack Query, React Hook Form + Zod, Leaflet + MapLibre (OpenFreeMap tiles),
 Supabase (Auth, Postgres + RLS, Edge Functions). Backend details: [`supabase/README.md`](supabase/README.md).
 
 ## Local development
@@ -46,7 +46,7 @@ or leaked, use **Replace token** and reprint: the old code stops working and lat
 Admin: login, dashboard (metrics, 30-day activity, status split, recent/suspicious scans, empty onboarding state),
 products (server-side search/filter/pagination, create/edit/archive/restore), unit QR (PNG, SVG, print, add units, replace/revoke
 token with audit reason), product detail with last reported location, scan history (all / suspicious / rejected attempts),
-location map (CARTO basemap tiles — not OSM’s blocked public tile servers; filters, accuracy circles, detail panel), CSV reports, settings (rule thresholds, retention, time zone).
+location map (OpenFreeMap vector basemap via MapLibre: free, no API key; filters, accuracy circles, detail panel), CSV reports, settings (rule thresholds, retention, time zone).
 Vendor: mobile scan page with consent explanation, optional business reference, permission/timeout/offline/revoked states, safe retry.
 Scan locations store GPS plus reverse-geocoded area/city/state/country (Nominatim, server-side at scan time).
 

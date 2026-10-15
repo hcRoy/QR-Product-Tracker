@@ -243,7 +243,16 @@ begin
   r := public.record_scan(te, gen_random_uuid(), 21.17, 72.83, 15, 'granted', now(), null, 'iph', 'UA');
   perform t.ok((select 'expired_product' = any(flags) from public.scan_events where id = (r ->> 'scan_id')::uuid),
                'scanning an expired product is flagged');
+
+  perform t.ok(public.set_scan_place((r ->> 'scan_id')::uuid, ' Hadapsar ', 'Pune', 'Maharashtra', 'India'),
+               'set_scan_place fills place labels after the scan is recorded');
+  perform t.ok((select location_area = 'Hadapsar' and location_city = 'Pune' from public.scan_events
+                 where id = (r ->> 'scan_id')::uuid), 'filled place labels are trimmed and stored');
+  perform t.ok(not public.set_scan_place((r ->> 'scan_id')::uuid, 'X', 'Y', 'Z', 'W'),
+               'set_scan_place is write-once: existing labels are not overwritten');
+  perform t.ok(not public.set_scan_place((r ->> 'scan_id')::uuid, null, ' ', null, null), 'empty place is ignored');
   reset role;
+  perform t.fails($q$select public.set_scan_place(gen_random_uuid(), 'a', 'b', 'c', 'd')$q$, 'only service_role can set scan places');
 end $$;
 
 -- 10. Dashboard metrics, suspicious view, map ------------------------------------------------------
