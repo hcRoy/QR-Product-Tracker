@@ -4,7 +4,7 @@ import { supabase, SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabase";
 import { TOKEN_RE } from "../lib/qr";
 import { getLocation, makeKeyTracker, payloadSig, type GeoResult, type LocationStatus, type ScanPayload } from "../lib/geo";
 import { fmtDate } from "../lib/format";
-import { Badge, Button, Input, Skeleton } from "../components/ui";
+import { Badge, Button, Skeleton } from "../components/ui";
 
 interface PublicProduct {
   name: string; manufacturer: string | null; category: string | null; description: string | null; batch_number: string | null;
@@ -13,9 +13,18 @@ interface PublicProduct {
   sku?: string | null;
 }
 interface Provenance { location_type: string | null; city: string | null; occurred_on: string }
-type Lookup = { kind: "loading" } | { kind: "ok"; product: PublicProduct; allowNoGps: boolean; scanCount?: number; firstScannedAt?: string | null; actions: string[]; provenance?: Provenance[]; viewerRole?: string; adminProductId?: string | null } | { kind: "bad"; title: string; msg: string };
-type Phase = { kind: "idle" } | { kind: "locating" } | { kind: "submitting" }
-  | { kind: "done"; located: boolean; accuracy?: number } | { kind: "locfail"; status: Exclude<LocationStatus, "granted"> } | { kind: "neterr"; msg: string } | { kind: "rejected"; msg: string };
+type Lookup =
+  | { kind: "loading" }
+  | { kind: "ok"; product: PublicProduct; allowNoGps: boolean; scanCount?: number; firstScannedAt?: string | null; actions: string[]; provenance?: Provenance[]; viewerRole?: string; adminProductId?: string | null }
+  | { kind: "bad"; title: string; msg: string };
+type Phase =
+  | { kind: "idle" }
+  | { kind: "locating" }
+  | { kind: "submitting" }
+  | { kind: "done"; located: boolean; accuracy?: number }
+  | { kind: "locfail"; status: Exclude<LocationStatus, "granted"> }
+  | { kind: "neterr"; msg: string }
+  | { kind: "rejected"; msg: string };
 
 async function call(fn: "track-lookup" | "track-scan", body: unknown) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
@@ -30,25 +39,29 @@ async function call(fn: "track-lookup" | "track-scan", body: unknown) {
 }
 
 const LOC_HELP: Record<string, string> = {
-  denied: "Location permission was denied. You can allow it in your browser's site settings and try again.",
+  denied: "Location permission was denied. Allow it in your browser's site settings, then share location to finish recording.",
   unavailable: "Your device could not determine its location. Check that location services are turned on.",
   timeout: "Getting your location took too long. Move to an open area and try again.",
   unsupported: "This browser or connection cannot share location (it requires a secure HTTPS page).",
 };
 const REJECT_MSG: Record<string, string> = {
   invalid_token: "This QR code is not recognised.", revoked: "This QR code has been deactivated.", unavailable: "This product is no longer being tracked.",
-  location_required: "Location is required to record this scan. Please allow location access.", invalid_input: "The scan could not be validated. Please try again.",
+  location_required: "Location is required to record this scan. Please share your location.", invalid_input: "The scan could not be validated. Please try again.",
 };
 
 export default function Track() {
   const { token = "" } = useParams();
   const [lookup, setLookup] = useState<Lookup>({ kind: "loading" });
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
-  const [ref, setRef] = useState("");
   const keys = useRef(makeKeyTracker());
   const lastGeo = useRef<GeoResult | null>(null);
+  const autoStarted = useRef(false);
+  const allowNoGps = useRef(true);
 
   useEffect(() => {
+    autoStarted.current = false;
+    setPhase({ kind: "idle" });
+    setLookup({ kind: "loading" });
     if (!TOKEN_RE.test(token)) { setLookup({ kind: "bad", title: "Invalid QR code", msg: "This link is not a valid product QR code." }); return; }
     call("track-lookup", { token }).then(({ status, json }) => {
       if (status === 200 && json?.status === "ok") setLookup({
@@ -66,36 +79,64 @@ export default function Track() {
   async function submit(geo: GeoResult) {
     lastGeo.current = geo;
     const base: Omit<ScanPayload, "idempotencyKey"> = {
-      token, locationStatus: geo.status, vendorReference: ref.trim() || undefined,
+      token, locationStatus: geo.status,
       location: geo.status === "granted" ? geo.reading : undefined,
     };
     const body: ScanPayload = { ...base, idempotencyKey: keys.current.keyFor(payloadSig(base)) };
     setPhase({ kind: "submitting" });
     try {
       const { status, json } = await call("track-scan", body);
-      if (status === 200 && json?.result === "accepted") { keys.current.reset(); setPhase({ kind: "done", located: !!json.locationRecorded, accuracy: geo.status === "granted" ? geo.reading.accuracyM : undefined }); }
-      else if (status === 429) setPhase({ kind: "neterr", msg: "Too many attempts. Wait a minute and try again." });
-      else if (status >= 500) setPhase({ kind: "neterr", msg: "The server had a problem. Your scan was not confirmed. Please try again." });
-      else { keys.current.reset(); setPhase({ kind: "rejected", msg: REJECT_MSG[json?.reason] ?? "The scan could not be recorded." }); }
+      if (status === 200 && json?.result === "accepted") {
+        keys.current.reset();
+        setPhase({ kind: "done", located: !!json.locationRecorded, accuracy: geo.status === "granted" ? geo.reading.accuracyM : undefined });
+      } else if (status === 429) {
+        setPhase({ kind: "neterr", msg: "Too many attempts. Wait a minute and try again." });
+      } else if (status >= 500) {
+        setPhase({ kind: "neterr", msg: "The server had a problem. Your scan was not confirmed. Please try again." });
+      } else {
+        keys.current.reset();
+        setPhase({ kind: "rejected", msg: REJECT_MSG[json?.reason] ?? "The scan could not be recorded." });
+      }
     } catch {
       // Same key is reused on retry, so a request that actually reached the server is not recorded twice.
       setPhase({ kind: "neterr", msg: "Could not reach the server. Your scan was not confirmed. Check your connection and try again." });
     }
   }
-  async function shareLocation() {
+
+  /** Ask for GPS once, then record. If GPS is optional and permission fails, still record without coordinates. */
+  async function recordWithLocation(optionalGps: boolean) {
     setPhase({ kind: "locating" });
     const geo = await getLocation();
-    if (geo.status === "granted") await submit(geo); else setPhase({ kind: "locfail", status: geo.status });
+    if (geo.status === "granted") {
+      await submit(geo);
+      return;
+    }
+    if (optionalGps) {
+      await submit(geo);
+      return;
+    }
+    setPhase({ kind: "locfail", status: geo.status });
   }
+
+  useEffect(() => {
+    if (lookup.kind !== "ok" || autoStarted.current) return;
+    autoStarted.current = true;
+    allowNoGps.current = lookup.allowNoGps;
+    void recordWithLocation(lookup.allowNoGps);
+  }, [lookup]);
 
   return (
     <div className="mx-auto min-h-screen max-w-md bg-white pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-sm">
-      <header className="bg-brand px-5 py-4 text-white"><p className="text-xs uppercase tracking-wide text-indigo-200">Product tracking</p><h1 className="text-lg font-semibold">Scan check-in</h1></header>
+      <header className="bg-brand px-5 py-4 text-white">
+        <p className="text-xs uppercase tracking-wide text-indigo-200">Product tracking</p>
+        <h1 className="text-lg font-semibold">Scan check-in</h1>
+      </header>
       <main className="space-y-5 p-5">
         {lookup.kind === "loading" && <div className="space-y-3" aria-busy="true"><Skeleton className="h-6 w-2/3" /><Skeleton className="h-24" /><Skeleton className="h-12" /></div>}
         {lookup.kind === "bad" && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-5"><h2 className="font-semibold text-red-800">{lookup.title}</h2><p className="mt-1 text-sm text-red-700">{lookup.msg}</p></div>}
         {lookup.kind === "ok" && (() => {
           const p = lookup.product;
+          const busy = phase.kind === "idle" || phase.kind === "locating" || phase.kind === "submitting";
           return <>
             <section className="rounded-xl border border-slate-200 p-4">
               <p className="font-mono text-xs text-slate-500">{p.unit_label}</p>
@@ -133,30 +174,42 @@ export default function Track() {
             {phase.kind === "done" ? (
               <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-5">
                 <h2 className="font-semibold text-emerald-900">Scan recorded</h2>
-                <p className="mt-1 text-sm text-emerald-800">{phase.located ? `Your reported location${phase.accuracy ? ` (accuracy about ${Math.round(phase.accuracy)} m)` : ""} was saved with this scan.` : "Saved without a location."}</p>
+                <p className="mt-1 text-sm text-emerald-800">
+                  {phase.located
+                    ? `Your reported location${phase.accuracy ? ` (accuracy about ${Math.round(phase.accuracy)} m)` : ""} was saved with this scan.`
+                    : "Saved without a precise location."}
+                </p>
                 <p className="mt-2 text-xs text-emerald-700">This records that the code was scanned. It does not by itself prove the product is genuine.</p>
               </div>
-            ) : (<>
-              <section className="rounded-xl bg-accent p-4 text-sm text-slate-700">
-                <h2 className="font-semibold text-brand">Why we ask for your location</h2>
-                <p className="mt-1">The product owner records where this item was scanned so it can be tracked through distribution. Your browser will ask for permission; your location is only read once, when you tap the button, and is not tracked continuously.</p>
+            ) : (
+              <section className="space-y-3">
+                <div className="rounded-xl bg-accent p-4 text-sm text-slate-700">
+                  <h2 className="font-semibold text-brand">Recording your scan</h2>
+                  <p className="mt-1">
+                    {busy
+                      ? "This scan is being recorded now. Your browser may ask to share location once; it is only read for this check-in."
+                      : "Share your location so the product owner can see where this code was scanned."}
+                  </p>
+                </div>
+                {!window.isSecureContext && <p className="text-xs text-amber-700">This page is not using HTTPS, so location sharing is unavailable.</p>}
+                {phase.kind === "locating" && <p className="text-sm text-slate-600" aria-live="polite">Getting your location…</p>}
+                {phase.kind === "submitting" && <p className="text-sm text-slate-600" aria-live="polite">Recording scan…</p>}
+                {phase.kind === "locfail" && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{LOC_HELP[phase.status]}</div>}
+                {phase.kind === "neterr" && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{phase.msg}</div>}
+                {phase.kind === "rejected" && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{phase.msg}</div>}
+                {(phase.kind === "locfail" || phase.kind === "neterr" || phase.kind === "rejected") && (
+                  <Button
+                    className="w-full py-3 text-base"
+                    onClick={() => {
+                      if (phase.kind === "neterr" && lastGeo.current) void submit(lastGeo.current);
+                      else void recordWithLocation(allowNoGps.current);
+                    }}
+                  >
+                    {phase.kind === "neterr" ? "Try again" : "Share location"}
+                  </Button>
+                )}
               </section>
-              <label className="block space-y-1 text-sm"><span className="font-medium text-slate-700">Warehouse or business reference (optional)</span>
-                <Input maxLength={100} value={ref} onChange={(e) => setRef(e.target.value)} placeholder="e.g. Warehouse 3" /></label>
-              {phase.kind === "locfail" && <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{LOC_HELP[phase.status]}</div>}
-              {phase.kind === "neterr" && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{phase.msg}</div>}
-              {phase.kind === "rejected" && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{phase.msg}</div>}
-              {!window.isSecureContext && <p className="text-xs text-amber-700">This page is not using HTTPS, so location sharing is unavailable.</p>}
-              <div className="space-y-2">
-                {phase.kind === "neterr" ? (
-                  <Button className="w-full py-3 text-base" onClick={() => lastGeo.current ? submit(lastGeo.current) : shareLocation()}>Try again</Button>
-                ) : (
-                  <Button className="w-full py-3 text-base" disabled={phase.kind === "locating" || phase.kind === "submitting"} onClick={shareLocation}>
-                    {phase.kind === "locating" ? "Getting your location…" : phase.kind === "submitting" ? "Recording scan…" : phase.kind === "locfail" ? "Try location again" : "Share location and record scan"}</Button>)}
-                {lookup.allowNoGps && phase.kind !== "locating" && phase.kind !== "submitting" && phase.kind !== "neterr" &&
-                  <Button variant="secondary" className="w-full" onClick={() => submit({ status: phase.kind === "locfail" ? phase.status : "denied" })}>Record scan without location</Button>}
-              </div>
-            </>)}
+            )}
           </>;
         })()}
       </main>
