@@ -37,6 +37,9 @@ export interface Settings {
   timezone: string; allow_scan_without_gps: boolean; max_accuracy_m: number; min_rescan_seconds: number;
   frequency_window_seconds: number; frequency_max_scans: number; max_speed_kmh: number;
   location_retention_days: number; expiring_soon_days: number;
+  self_registration_mode: "off" | "review" | "auto"; claim_expiry_days: number; import_max_rows: number;
+  geofence_mode: "flag" | "block"; require_gps_for_custody: boolean; shipment_overdue_days: number;
+  consumer_provenance_enabled: boolean; vendor_sees_sku: boolean;
 }
 
 function check<T>(res: { data: T | null; error: { message: string } | null }): T {
@@ -134,6 +137,33 @@ export const getSettings = async () => check(await supabase.from("app_settings")
 export async function saveSettings(s: Settings) {
   check(await supabase.from("app_settings").update(s).eq("id", true).select("id").single());
 }
+export type AppRoleName = "admin" | "vendor" | "consumer";
+export interface AccountRow { id: string; full_name: string | null; role: AppRoleName; is_active: boolean; created_at: string }
+export interface OrgRow {
+  id: string; name: string; type: string; status: "pending" | "active" | "suspended" | "rejected";
+  created_via: string; tax_id_normalized: string | null; parent_org_id: string | null; parent_name: string | null;
+  created_at: string; member_count: number;
+}
+type Page<T> = { rows: T[]; total: number; page: number; page_size: number }
+async function awaitRpc<T>(fn: string, args: Record<string, unknown>): Promise<{ data: T | null; error: { message: string } | null }> {
+  const res = await supabase.rpc(fn, args);
+  return { data: res.data as T | null, error: res.error };
+}
+const done = async (fn: string, args: Record<string, unknown>) => {
+  const res = await supabase.rpc(fn, args);
+  check({ data: res.error ? null : true, error: res.error });
+};
+export const searchUsers = (page: number, q: string, role: string) =>
+  awaitRpc<Page<AccountRow>>("admin_search_users", { p_page: page, p_q: q || null, p_role: role || null }).then(check);
+export const setUserRole = (userId: string, role: AppRoleName) => done("admin_set_role", { p_user: userId, p_role: role });
+export const setUserActive = (userId: string, active: boolean) => done("admin_set_active", { p_user: userId, p_active: active });
+export const searchOrgs = (page: number, q: string, status: string) =>
+  awaitRpc<Page<OrgRow>>("admin_search_orgs", { p_page: page, p_q: q || null, p_status: status || null }).then(check);
+export const createOrg = (name: string, type: string, parentId: string, taxId: string) =>
+  awaitRpc<string>("admin_create_org", { p_name: name, p_type: type, p_parent: parentId || null, p_tax_id: taxId || null }).then(check);
+export const setOrgStatus = (orgId: string, status: "active" | "suspended" | "rejected", note: string) =>
+  done("admin_set_org_status", { p_org: orgId, p_status: status, p_note: note || null });
+
 export async function exportProducts() {
   const rows = check(await supabase.from("product_overview").select("*").order("created_at", { ascending: false }).limit(5000)) as ProductRow[];
   return rows;

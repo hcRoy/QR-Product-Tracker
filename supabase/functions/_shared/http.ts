@@ -48,14 +48,35 @@ export async function rateLimited(key: string, limit: number, windowSeconds = 60
   return data === false;
 }
 
+/** Verified user from an optional bearer token. A missing or invalid token is anonymous, not an error. */
+export async function optionalActor(req: Request): Promise<{ id: string; role: string } | null> {
+  try {
+    const header = req.headers.get("Authorization") ?? "";
+    if (!/^Bearer\s+\S+/i.test(header)) return null;
+    const token = header.replace(/^Bearer\s+/i, "").trim();
+    if (!token || token === Deno.env.get("SUPABASE_ANON_KEY")) return null;
+    const client = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, {
+      global: { headers: { Authorization: header } },
+      auth: { persistSession: false },
+    });
+    const { data, error } = await client.auth.getUser();
+    if (error || !data.user) return null;
+    const { data: profile } = await admin.from("profiles").select("role,is_active").eq("id", data.user.id).maybeSingle();
+    if (!profile?.is_active) return null;
+    return { id: data.user.id, role: String(profile.role) };
+  } catch {
+    return null;
+  }
+}
+
 /** Shared envelope: method/size checks, JSON parsing, uniform errors, no token/body logging. */
-export function handle(name: string, run: (req: Request, body: unknown) => Promise<Response>) {
+export function handle(name: string, run: (req: Request, body: unknown) => Promise<Response>, maxBytes = 4096) {
   return async (req: Request): Promise<Response> => {
     if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders(req) });
     if (req.method !== "POST") return json(req, 405, { error: "method_not_allowed" });
     try {
       const raw = await req.text();
-      if (raw.length > 4096) return json(req, 413, { error: "payload_too_large" });
+      if (raw.length > maxBytes) return json(req, 413, { error: "payload_too_large" });
       let body: unknown;
       try { body = JSON.parse(raw); } catch { return json(req, 400, { error: "invalid_json" }); }
       return await run(req, body);

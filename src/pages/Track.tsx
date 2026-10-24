@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabase";
+import { Link, useParams } from "react-router-dom";
+import { supabase, SUPABASE_ANON_KEY, SUPABASE_URL } from "../lib/supabase";
 import { TOKEN_RE } from "../lib/qr";
 import { getLocation, makeKeyTracker, payloadSig, type GeoResult, type LocationStatus, type ScanPayload } from "../lib/geo";
 import { fmtDate } from "../lib/format";
@@ -10,16 +10,20 @@ interface PublicProduct {
   name: string; manufacturer: string | null; category: string | null; description: string | null; batch_number: string | null;
   manufacturing_date: string | null; expiry_date: string | null; is_expired: boolean; package_type: string | null;
   package_description: string | null; package_quantity: number | null; unit_of_measure: string | null; unit_label: string;
+  sku?: string | null;
 }
-type Lookup = { kind: "loading" } | { kind: "ok"; product: PublicProduct; allowNoGps: boolean } | { kind: "bad"; title: string; msg: string };
+interface Provenance { location_type: string | null; city: string | null; occurred_on: string }
+type Lookup = { kind: "loading" } | { kind: "ok"; product: PublicProduct; allowNoGps: boolean; scanCount?: number; firstScannedAt?: string | null; actions: string[]; provenance?: Provenance[]; viewerRole?: string; adminProductId?: string | null } | { kind: "bad"; title: string; msg: string };
 type Phase = { kind: "idle" } | { kind: "locating" } | { kind: "submitting" }
   | { kind: "done"; located: boolean; accuracy?: number } | { kind: "locfail"; status: Exclude<LocationStatus, "granted"> } | { kind: "neterr"; msg: string } | { kind: "rejected"; msg: string };
 
 async function call(fn: "track-lookup" | "track-scan", body: unknown) {
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+  const headers: Record<string, string> = { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY };
+  const { data } = await supabase.auth.getSession();
+  if (data.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`;
   try {
-    const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, { method: "POST", signal: ctl.signal,
-      headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY }, body: JSON.stringify(body) });
+    const r = await fetch(`${SUPABASE_URL}/functions/v1/${fn}`, { method: "POST", signal: ctl.signal, headers, body: JSON.stringify(body) });
     let json: any = null; try { json = await r.json(); } catch { /* non-JSON error body */ }
     return { status: r.status, json };
   } finally { clearTimeout(t); }
@@ -47,7 +51,11 @@ export default function Track() {
   useEffect(() => {
     if (!TOKEN_RE.test(token)) { setLookup({ kind: "bad", title: "Invalid QR code", msg: "This link is not a valid product QR code." }); return; }
     call("track-lookup", { token }).then(({ status, json }) => {
-      if (status === 200 && json?.status === "ok") setLookup({ kind: "ok", product: json.product, allowNoGps: !!json.tracking?.allow_scan_without_gps });
+      if (status === 200 && json?.status === "ok") setLookup({
+        kind: "ok", product: json.product, allowNoGps: !!json.tracking?.allow_scan_without_gps,
+        scanCount: json.scan_count, firstScannedAt: json.first_scanned_at, actions: json.available_actions ?? [],
+        provenance: json.provenance, viewerRole: json.viewer_role, adminProductId: json.admin_product_id,
+      });
       else if (status === 429) setLookup({ kind: "bad", title: "Too many requests", msg: "Please wait a minute and scan again." });
       else if (status === 410) setLookup({ kind: "bad", title: json?.status === "revoked" ? "QR code deactivated" : "Product not tracked", msg: "This code can no longer record scans. Contact the product owner if you think this is a mistake." });
       else if (status === 404) setLookup({ kind: "bad", title: "QR code not recognised", msg: "We could not find a product for this code." });
@@ -100,6 +108,26 @@ export default function Track() {
                 {(p.package_type || p.package_quantity) && <div><dt className="text-slate-500">Package</dt><dd className="font-medium">{[p.package_type, p.package_quantity && `${p.package_quantity} ${p.unit_of_measure ?? ""}`].filter(Boolean).join(" · ")}</dd></div>}
               </dl>
               {p.package_description && <p className="mt-3 text-sm text-slate-600">{p.package_description}</p>}
+              {p.sku && <p className="mt-2 text-sm text-slate-600">SKU {p.sku}</p>}
+              <p className="mt-3 text-sm text-slate-600">Scanned {lookup.scanCount ?? 0} time{(lookup.scanCount ?? 0) === 1 ? "" : "s"}{lookup.firstScannedAt ? ` · first on ${fmtDate(lookup.firstScannedAt)}` : ""}.</p>
+              <p className="mt-2 text-xs text-slate-500">A scan shows that this code was read. It does not prove the product is genuine.</p>
+              {lookup.provenance && (
+                <div className="mt-3">
+                  <h3 className="text-sm font-semibold text-brand">Where it has been recorded</h3>
+                  {lookup.provenance.length === 0 ? <p className="text-sm text-slate-500">No custody stops recorded.</p> : (
+                    <ul className="mt-1 space-y-1 text-sm">{lookup.provenance.map((stop, i) => (
+                      <li key={`${stop.occurred_on}-${i}`}>{fmtDate(stop.occurred_on)} · {stop.location_type ?? "stop"}{stop.city ? ` · ${stop.city}` : ""}</li>
+                    ))}</ul>
+                  )}
+                  <p className="mt-1 text-xs text-slate-500">City and location type only. Exact coordinates are not shown here.</p>
+                </div>
+              )}
+              {lookup.actions.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">{lookup.actions.map((action) => (
+                  <Link key={action} to={`/v/scan?token=${encodeURIComponent(token)}&action=${action}`}><Button variant="secondary">{action.replace(/_/g, " ")}</Button></Link>
+                ))}</div>
+              )}
+              {lookup.adminProductId && <p className="mt-3 text-sm"><Link className="text-brand hover:underline" to={`/products/${lookup.adminProductId}`}>Open in the admin catalogue</Link></p>}
             </section>
 
             {phase.kind === "done" ? (

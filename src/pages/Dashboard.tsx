@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { getActivity, getMetrics, listScans } from "../lib/api";
+import { supplyMetrics } from "../lib/phase2";
 import { fmtDate } from "../lib/format";
 import { Card, EmptyState, ErrorState, PageHeader, Skeleton, Button } from "../components/ui";
 import { ScanTable } from "../components/ScanTable";
@@ -42,6 +43,7 @@ export default function Dashboard() {
   const act = useQuery({ queryKey: ["activity"], queryFn: () => getActivity(30) });
   const recent = useQuery({ queryKey: ["scans", "recent"], queryFn: () => listScans({ page: 1, pageSize: 6 }) });
   const susp = useQuery({ queryKey: ["scans", "suspicious-recent"], queryFn: () => listScans({ page: 1, pageSize: 5, flaggedOnly: true }) });
+  const chain = useQuery({ queryKey: ["supply-metrics"], queryFn: supplyMetrics });
 
   if (m.isError) return <ErrorState error={m.error} retry={() => m.refetch()} />;
   const d = m.data;
@@ -69,6 +71,12 @@ export default function Dashboard() {
         <Stat label="Scans today" value={d?.scans_today} />
         <Stat label="Expired" value={d?.expired_products} hint="Active products past expiry" />
         <Stat label="Expiring soon" value={d?.expiring_soon} hint="Within the configured window" />
+        {chain.data && <>
+          <Stat label="In transit" value={chain.data.units_in_transit} to="/shipments" />
+          <Stat label="Open discrepancies" value={chain.data.open_discrepancies} to="/discrepancies" />
+          <Stat label="Overdue shipments" value={chain.data.overdue_shipments} hint="Past the configured number of days" to="/shipments" />
+          <Stat label="Active locations" value={chain.data.locations} to="/locations" />
+        </>}
       </div>
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">

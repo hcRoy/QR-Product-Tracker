@@ -2,15 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import L from "leaflet";
-import { setWorkerUrl } from "maplibre-gl";
-import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
-import { maplibreGL } from "@maplibre/maplibre-gl-leaflet";
+import { maplibreGL, mapStyle } from "../lib/mapSetup";
 import { getMapPoints, listProducts, type MapPoint } from "../lib/api";
 import { FLAG_LABELS, SUSPICIOUS_FLAGS, fmtCoords, fmtDateTime, fmtPlace } from "../lib/format";
 import { Badge, Card, ErrorState, Input, PageHeader, Select } from "../components/ui";
-
-// MapLibre resolves its worker next to its own module, which breaks once Vite pre-bundles it.
-setWorkerUrl(maplibreWorkerUrl);
 
 export default function MapPage() {
   const [sp] = useSearchParams();
@@ -27,7 +22,7 @@ export default function MapPage() {
     if (!el.current || map.current) return;
     map.current = L.map(el.current).setView([21.17, 72.83], 5);
     // OpenFreeMap: free, no API key. tile.openstreetmap.org blocks this app (no Referer is sent) and CARTO needs a key.
-    maplibreGL({ style: import.meta.env.VITE_MAP_STYLE_URL || "https://tiles.openfreemap.org/styles/positron" }).addTo(map.current);
+    maplibreGL({ style: mapStyle() }).addTo(map.current);
     map.current.attributionControl.addAttribution(
       '<a href="https://openfreemap.org" target="_blank" rel="noreferrer">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
     );

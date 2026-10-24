@@ -7,17 +7,27 @@
 - `migrations/0004_scan_place_fields.sql` reverse-geocoded place columns on `scan_events`, updated `record_scan` / `map_points`
 - `migrations/0005_product_overview_place.sql` last-scan place labels on `product_overview`
 - `migrations/0006_set_scan_place.sql` write-once `set_scan_place()` used to fill place labels after a scan is saved
-- `functions/track-lookup`, `functions/track-scan` the only public (unauthenticated) endpoints
+- `migrations/0007_roles_enum.sql` adds `vendor` and `consumer` to `app_role` (nothing else; new values cannot be used in the same transaction)
+- `migrations/0008_roles_users.sql` active flag, `viewer` → `consumer`, role-change guard, last-admin protection
+- `migrations/0009_organizations.sql` organizations, membership, claim-code storage, admin user/org RPCs
+- `migrations/0010_onboarding.sql` claim redemption, self-registration, staff invites, join codes, bulk import
+- `migrations/0011_scan_attribution.sql` scanner on each scan, daily scan rollup, vendor scan/product reads
+- `migrations/0012_supply_chain.sql` locations, shipments, custody events, discrepancies
+- `migrations/0013_supply_map_aggregates.sql` supply-map reads aggregate in a subquery, then build JSON
+- `functions/track-lookup`, `functions/track-scan` public tracking. A bearer token is optional and is verified on the server.
+- `functions/onboarding` public registration and claim preview (`verify_jwt` false)
+- `functions/claim`, `functions/org-admin`, `functions/custody-action`, `functions/admin-users` require a user JWT
 - `tests/` SQL integration tests (RLS, tokens, scans, rules) and `run.sh`; Deno tests live in `functions/_shared/`
 
 ## Setup
 1. Create a Supabase project. Apply migrations in order (`supabase db push`, or paste each file in the SQL editor).
 2. Create your first admin: sign up a user, then in the SQL editor:
    `update public.profiles set role = 'admin' where id = '<auth user id>';`
-   (New sign-ups are always `viewer`; there is no self-service path to admin.)
+   (New sign-ups are `consumer`. Admin is never self-service. A vendor role is granted only when an organization is approved or a claim code is redeemed.)
 3. Set function secrets: `supabase secrets set ALLOWED_ORIGINS=https://your-domain.com IP_HASH_SECRET=$(openssl rand -hex 32)`
    For place names also set `GEOCODE_CONTACT_EMAIL=you@your-domain.com` and (recommended) `LOCATIONIQ_API_KEY=<free token from locationiq.com>`.
-4. Deploy: `supabase functions deploy track-lookup track-scan` (`config.toml` sets `verify_jwt = false` for both).
+4. Deploy: `supabase functions deploy track-lookup track-scan admin-users onboarding claim org-admin custody-action`
+   For vendor registration set `CAPTCHA_SECRET` (Turnstile or hCaptcha; `CAPTCHA_PROVIDER=turnstile` or `hcaptcha`). `CAPTCHA_DEV_BYPASS=on` skips it on a private demo only. `AUTO_CONFIRM_VENDOR_EMAIL=on` lets a new vendor sign in without an email confirmation.
 5. Optional retention job (pg_cron): `select cron.schedule('purge-locations', '17 3 * * *', 'select public.purge_old_locations()');`
 
 ## Security model
@@ -25,12 +35,13 @@
 |---|---|
 | anon | Nothing directly. No table or function grants. |
 | Public vendor | Calls the two Edge Functions, which use `service_role` to run `public_lookup` / `record_scan`. |
-| authenticated viewer | Nothing (RLS returns zero rows; RPCs raise `forbidden`). |
+| authenticated consumer | Public scan result only, plus their own vendor application status. No catalogue, prices, or tokens. |
+| authenticated vendor | Own scans (owners and managers see their organization's scans) through RPCs. No direct read of products, tokens, or prices. Custody only at an assigned location of an active organization. |
 | authenticated admin | Read all tables; insert/update `products`; everything else through audited RPCs. |
 
 - No DELETE policy on any table: products are archived, never deleted. `scan_events` is append-only (trigger blocks UPDATE/DELETE; only `purge_old_locations()` may null out coordinates).
 - Admin-only columns are protected from mass assignment (`products_guard` trigger; RPCs use explicit column lists).
-- Public payload allow-list (`public_lookup`): name, manufacturer, category, description, batch, mfg/expiry dates, expired flag, package fields, unit label. **Not exposed:** internal IDs, SKU, price, token, creator.
+- Public payload allow-list (`public_lookup`): name, manufacturer, category, description, batch, mfg/expiry dates, expired flag, package fields, unit label, plus a scan count and first-scan time. **Not exposed:** internal IDs, SKU (unless the viewer is a vendor and `vendor_sees_sku` is on), price, token, creator. Provenance, when enabled, is location type, city, and date only.
 
 ## Token lifecycle
 - 128-bit CSPRNG (`pgcrypto`), base64url, 22 chars, `UNIQUE` in the database. QR URL: `{VITE_PUBLIC_APP_URL}/track/{token}`.

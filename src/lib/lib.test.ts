@@ -4,6 +4,9 @@ import { TOKEN_RE, trackingUrl } from "./qr";
 import { makeKeyTracker, mapGeoError, payloadSig } from "./geo";
 import { csvCell, toCsv } from "./csv";
 import { fmtPlace, safeSearch } from "./format";
+import { destinationForRole, homeForRole } from "./roles";
+import { extractToken } from "./scanToken";
+import { summarizeBulk, upsertBulk } from "./bulk";
 
 const valid = { ...emptyProductForm, name: "Tea", batch_number: "B1", unit_count: "3" };
 const bad = (over: object) => productSchema.safeParse({ ...valid, ...over });
@@ -72,6 +75,47 @@ describe("csv export safety", () => {
 
 describe("search sanitising", () => {
   it("strips characters that alter PostgREST filter syntax", () => expect(safeSearch("a,b)(c%d")).toBe("a b  c d"));
+});
+
+describe("role routing", () => {
+  it("sends each role to its own home", () => {
+    expect(homeForRole("admin")).toBe("/");
+    expect(homeForRole("vendor")).toBe("/v");
+    expect(homeForRole("consumer")).toBe("/c");
+  });
+  it("keeps a deep link only when that role may open it", () => {
+    expect(destinationForRole("admin", "/products/1")).toBe("/products/1");
+    expect(destinationForRole("admin", "/v")).toBe("/");
+    expect(destinationForRole("vendor", "/products")).toBe("/v");
+    expect(destinationForRole("vendor", "/v/scans")).toBe("/v/scans");
+    expect(destinationForRole("consumer", "/c")).toBe("/c");
+    expect(destinationForRole("consumer", "/")).toBe("/c");
+    expect(destinationForRole("admin", "/login")).toBe("/");
+  });
+});
+
+describe("scan token extraction", () => {
+  const token = "AbcdEFGHijklMNOPqrst_1";
+  it("accepts a raw token", () => expect(extractToken(`  ${token}  `)).toBe(token));
+  it("accepts a tracking link and ignores query strings", () => {
+    expect(extractToken(`https://example.com/track/${token}?x=1`)).toBe(token);
+    expect(extractToken(`/track/${token}`)).toBe(token);
+  });
+  it("rejects garbage, short strings, and tokens with illegal characters", () => {
+    expect(extractToken("not a code")).toBeNull();
+    expect(extractToken("A".repeat(21))).toBeNull();
+    expect(extractToken(`${"A".repeat(21)}+`)).toBeNull();
+    expect(extractToken("")).toBeNull();
+  });
+});
+
+describe("bulk scan list", () => {
+  it("keeps one row per token and replaces that row on retry", () => {
+    const once = upsertBulk([], "aaa", "pending");
+    const twice = upsertBulk(upsertBulk(once, "bbb", "ok"), "aaa", "error", "revoked");
+    expect(twice).toEqual([{ token: "aaa", state: "error", message: "revoked" }, { token: "bbb", state: "ok", message: undefined }]);
+    expect(summarizeBulk(twice)).toEqual({ ok: 1, error: 1, pending: 0 });
+  });
 });
 
 describe("place formatting", () => {

@@ -1,6 +1,6 @@
 // POST /functions/v1/track-scan  (see _shared/schemas.ts for the body)
 // The server sets the timestamp; product/unit identity is derived from the token only.
-import { admin, fingerprint, handle, hashIp, json, rateLimited } from "../_shared/http.ts";
+import { admin, fingerprint, handle, hashIp, json, optionalActor, rateLimited } from "../_shared/http.ts";
 import { scanSchema } from "../_shared/schemas.ts";
 import { reverseGeocode } from "../_shared/geocode.ts";
 
@@ -42,6 +42,8 @@ Deno.serve(handle("track-scan", async (req, body) => {
     return json(req, 429, { error: "rate_limited" }, { "Retry-After": "60" });
   }
 
+  const actor = await optionalActor(req);
+  const source = actor && (actor.role === "admin" || actor.role === "vendor" || actor.role === "consumer") ? actor.role : "public";
   const { data, error } = await admin.rpc("record_scan", {
     p_token: v.token,
     p_idem: v.idempotencyKey,
@@ -53,6 +55,8 @@ Deno.serve(handle("track-scan", async (req, body) => {
     p_vendor_ref: v.vendorReference ?? null,
     p_ip_hash: ipHash,
     p_ua: req.headers.get("user-agent"),
+    p_scanner: actor?.id ?? null,
+    p_source: source,
   });
   if (error) throw error;
 

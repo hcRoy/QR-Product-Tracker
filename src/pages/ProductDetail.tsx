@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { addUnits, getProduct, listProducts, listScans, listUnits, revokeUnit, rotateToken, setProductStatus, type UnitRow } from "../lib/api";
+import { productCustody } from "../lib/phase2";
 import { downloadDataUrl, downloadText, printLabels, qrPngDataUrl, qrSvg, trackingUrl } from "../lib/qr";
 import { fmtCoords, fmtDate, fmtDateTime, fmtMoney, fmtPlace } from "../lib/format";
 import { Badge, Button, Card, ErrorState, Input, PageHeader, Pager, Skeleton, TableSkeleton } from "../components/ui";
@@ -34,6 +35,7 @@ export default function ProductDetail() {
   const { id = "" } = useParams();
   const [sp] = useSearchParams();
   const qc = useQueryClient();
+  const custody = useQuery({ queryKey: ["custody", id], queryFn: () => productCustody(id), enabled: !!id });
   const [unitPage, setUnitPage] = useState(1);
   const [scanPage, setScanPage] = useState(1);
   const [qrUnit, setQrUnit] = useState<UnitRow | null>(null);
@@ -138,6 +140,16 @@ export default function ProductDetail() {
                   {u.status === "active" && <button className="text-red-700 hover:underline" onClick={() => setAction({ kind: "revoke", unit: u })}>Revoke</button>}
                 </td></tr>))}</tbody></table></div>)}
         {units.data && <Pager page={unitPage} pageSize={50} total={units.data.total} onPage={setUnitPage} />}
+      </Card>
+
+      <Card className="mt-5">
+        <h2 className="mb-2 font-semibold text-slate-800">Custody</h2>
+        <p className="mb-3 text-xs text-slate-500">Handovers recorded by an administrator or an assigned vendor. A public scan is not a custody event.</p>
+        {custody.isLoading ? <Skeleton className="h-16" /> : custody.isError ? <p className="text-sm text-slate-500">Custody history is unavailable until the supply-chain migration is applied.</p> : (custody.data ?? []).length === 0 ? <p className="text-sm text-slate-500">No custody events for this product.</p> : (
+          <ul className="space-y-1 text-sm">{custody.data!.map((e) => (
+            <li key={e.id}>{fmtDateTime(e.occurred_at)} · {e.unit_label} · {e.event_type}{e.location_name ? ` · ${e.location_name}` : ""}{e.city ? `, ${e.city}` : ""}{e.geofence_status ? ` · ${e.geofence_status}` : ""}</li>
+          ))}</ul>
+        )}
       </Card>
 
       <Card className="mt-5 !p-0 overflow-hidden">

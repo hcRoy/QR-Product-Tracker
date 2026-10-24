@@ -5,3 +5,22 @@ verify_jwt = false
 
 [functions.track-scan]
 verify_jwt = false
+
+# Platform-admin user and organization management. The gateway rejects a missing JWT;
+# the function also checks the user, and the SQL checks is_admin() again.
+[functions.admin-users]
+verify_jwt = true
+
+# Account creation and claim preview. Captcha and rate limits are inside the function.
+[functions.onboarding]
+verify_jwt = false
+
+# Redeeming a claim requires the signed-in user. The function checks the JWT again.
+[functions.claim]
+verify_jwt = true
+
+[functions.org-admin]
+verify_jwt = true
+
+[functions.custody-action]
+verify_jwt = true
