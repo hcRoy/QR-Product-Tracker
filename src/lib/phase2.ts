@@ -57,11 +57,14 @@ export const vendorSummary = () => rpc<{ inbound: number; to_dispatch: number }>
 export const vendorShipments = () => rpc<VendorShipment[]>("vendor_open_shipments");
 export const vendorShipmentDetail = (id: string) => rpc<{ id: string; reference: string; status: string; units: { unit_label: string; product_name: string; unit_state: string; line_status: string }[] }>("vendor_shipment_detail", { p_shipment: id });
 
-export const recordCustody = (p: { action: string; token: string; locationId: string; idem: string; note?: string; lat?: number; lon?: number; accuracy?: number }) =>
+export const recordCustody = (p: {
+  action: string; token: string; locationId: string; idem: string; note?: string;
+  lat?: number; lon?: number; accuracy?: number; locStatus?: string;
+}) =>
   rpc<{ result: string; reason?: string; replayed?: boolean; geofence?: string }>("record_custody_action", {
     p_action: p.action, p_token: p.token, p_location: p.locationId, p_shipment: null, p_idem: p.idem,
     p_lat: p.lat ?? null, p_lon: p.lon ?? null, p_accuracy: p.accuracy ?? null,
-    p_loc_status: p.lat == null ? "denied" : "granted", p_note: p.note ?? null,
+    p_loc_status: p.locStatus ?? (p.lat == null ? "denied" : "granted"), p_note: p.note ?? null,
   });
 export const dispatchShipment = (id: string, idem: string) =>
   rpc<{ result: string; reason?: string }>("dispatch_shipment", { p_shipment: id, p_idem: idem, p_lat: null, p_lon: null, p_accuracy: null, p_loc_status: "denied" });
@@ -91,3 +94,44 @@ export const productCustody = (productId: string) => rpc<{ id: string; event_typ
 export const custodyExport = () => rpc<{ occurred_at: string; event_type: string; unit_label: string; product_name: string; location_name: string | null; city: string | null; geofence_status: string | null; note: string | null }[]>("admin_custody_export", { p_from: null, p_to: null });
 export const unitsByLocation = () => rpc<{ location_id: string; name: string; city: string | null; latitude: number | null; longitude: number | null; in_stock: number; in_transit: number }[]>("units_by_location");
 export const laneVolumes = () => rpc<{ origin_name: string; destination_name: string; origin_lat: number | null; origin_lon: number | null; destination_lat: number | null; destination_lon: number | null; shipments: number }[]>("lane_volumes");
+
+export interface ProductBrief { id: string; name: string; batch_number: string | null }
+export interface SelectableUnit { id: string; serial: number; label: string; product_name: string }
+
+function unitLabel(batch: string | null, serial: number) {
+  return `${(batch ?? "").trim().toUpperCase() || "NB"}-${String(serial).padStart(5, "0")}`;
+}
+
+/** Active catalogue products for shipment pickers. */
+export async function listActiveProductsBrief(): Promise<ProductBrief[]> {
+  const res = await supabase.from("products").select("id,name,batch_number").eq("status", "active").order("name").limit(500);
+  if (res.error) throw new Error(res.error.message);
+  return (res.data ?? []) as ProductBrief[];
+}
+
+/** Units that can be placed into a location (still registered, not yet in stock). */
+export async function listPlaceableUnits(productId: string): Promise<SelectableUnit[]> {
+  const res = await supabase.from("product_units")
+    .select("id,serial,products!inner(name,batch_number)")
+    .eq("product_id", productId).eq("status", "active").eq("unit_state", "registered")
+    .order("serial").limit(500);
+  if (res.error) throw new Error(res.error.message);
+  return (res.data ?? []).map((u) => {
+    const p = u.products as unknown as { name: string; batch_number: string | null };
+    return { id: u.id as string, serial: u.serial as number, label: unitLabel(p.batch_number, u.serial as number), product_name: p.name };
+  });
+}
+
+/** Units in stock at a location that can be added to a draft shipment from that origin. */
+export async function listShippableUnits(productId: string, locationId: string): Promise<SelectableUnit[]> {
+  const res = await supabase.from("product_units")
+    .select("id,serial,products!inner(name,batch_number)")
+    .eq("product_id", productId).eq("status", "active").eq("unit_state", "in_stock")
+    .eq("current_location_id", locationId)
+    .order("serial").limit(500);
+  if (res.error) throw new Error(res.error.message);
+  return (res.data ?? []).map((u) => {
+    const p = u.products as unknown as { name: string; batch_number: string | null };
+    return { id: u.id as string, serial: u.serial as number, label: unitLabel(p.batch_number, u.serial as number), product_name: p.name };
+  });
+}

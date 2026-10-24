@@ -21,7 +21,7 @@ export default function ConsumerScan() {
       <QrCamera onCode={open} />
       <Card>
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (token) nav(`/track/${token}`); }}>
-          <Field label="Code or link" hint="Paste the QR text if the camera cannot read it."><Input value={raw} onChange={(e) => setRaw(e.target.value)} /></Field>
+          <Field label="Code or link" hint="Optional. Use only if the camera or photo cannot read the code."><Input value={raw} onChange={(e) => setRaw(e.target.value)} /></Field>
           {raw && !token && <p className="text-sm text-red-700">That is not a product code.</p>}
           <Button type="submit" className="w-full" disabled={!token}>Open product</Button>
         </form>

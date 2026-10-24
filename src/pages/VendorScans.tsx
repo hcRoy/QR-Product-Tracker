@@ -3,7 +3,15 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { vendorScans, type VendorScan } from "../lib/phase2";
 import { fmtDateTime, fmtPlace } from "../lib/format";
-import { Button, ErrorState, Skeleton } from "../components/ui";
+import { Badge, Button, ErrorState, Skeleton } from "../components/ui";
+
+const LOC_LABEL: Record<string, string> = {
+  granted: "Location shared",
+  denied: "No GPS (permission not shared)",
+  unavailable: "No GPS (device unavailable)",
+  timeout: "No GPS (timed out)",
+  unsupported: "No GPS (not supported here)",
+};
 
 export default function VendorScans() {
   const [before, setBefore] = useState<{ at?: string; id?: string }>({});
@@ -34,14 +42,21 @@ export default function VendorScans() {
       ) : (
         <>
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {shown.map((s) => (
-              <li key={s.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
-                <p className="font-semibold text-slate-900">{s.product_name}</p>
-                <p className="mt-0.5 font-mono text-xs text-slate-500">{s.unit_label}</p>
-                <p className="mt-2 text-sm text-slate-600">{fmtPlace(s) ?? s.location_status}</p>
-                <p className="mt-1 text-xs text-slate-400">{fmtDateTime(s.scanned_at)}</p>
-              </li>
-            ))}
+            {shown.map((s) => {
+              const place = fmtPlace(s);
+              return (
+                <li key={s.id} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-5">
+                  <p className="font-semibold text-slate-900">{s.product_name}</p>
+                  <p className="mt-0.5 font-mono text-xs text-slate-500">{s.unit_label}</p>
+                  {place ? (
+                    <p className="mt-2 text-sm text-slate-600">{place}</p>
+                  ) : (
+                    <p className="mt-2"><Badge tone="slate">{LOC_LABEL[s.location_status] ?? `No GPS (${s.location_status})`}</Badge></p>
+                  )}
+                  <p className="mt-1 text-xs text-slate-400">{fmtDateTime(s.scanned_at)}</p>
+                </li>
+              );
+            })}
           </ul>
           {page.length === 25 && (
             <Button

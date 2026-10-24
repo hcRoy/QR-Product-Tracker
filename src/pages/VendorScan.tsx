@@ -9,10 +9,21 @@ import { recordCustody, vendorLocations } from "../lib/phase2";
 import { getLocation } from "../lib/geo";
 
 const ACTIONS = [
-  { id: "receive", label: "Receive" },
-  { id: "sell", label: "Sell" },
-  { id: "report_lost", label: "Report lost" },
-];
+  { id: "receive", label: "Receive", hint: "Only for units on an open shipment sent to this location." },
+  { id: "sell", label: "Sell", hint: "Only for units already in stock at a retailer location assigned to you." },
+  { id: "report_lost", label: "Report lost", hint: "Marks the unit lost or damaged. A note is required." },
+] as const;
+
+const REASON_MSG: Record<string, string> = {
+  unit_not_in_shipment: "This unit is not on an open shipment. An admin must place it, add it to a shipment, and dispatch before you can receive it.",
+  wrong_destination: "This unit is shipping to a different location than the one you selected.",
+  illegal_transition: "This action is not allowed for the unit's current state or location type.",
+  note_required: "Add a note before reporting a loss.",
+  invalid_token: "This QR code is not recognised.",
+  revoked: "This QR code has been deactivated.",
+  unavailable: "This product is archived and cannot be updated.",
+  invalid_input: "Check the action and location, then try again.",
+};
 
 export default function VendorScan() {
   const [sp] = useSearchParams();
@@ -21,7 +32,7 @@ export default function VendorScan() {
   const [action, setAction] = useState(sp.get("action") ?? "receive");
   const [locationId, setLocationId] = useState("");
   const [note, setNote] = useState("");
-  const [withGps, setWithGps] = useState(false);
+  const [withGps, setWithGps] = useState(true);
   const [items, setItems] = useState<BulkItem[]>([]);
   const [busy, setBusy] = useState(false);
   const keys = useRef(new Map<string, string>());
@@ -41,17 +52,24 @@ export default function VendorScan() {
     if (!chosen || tokens.length === 0) return;
     setBusy(true);
     let lat: number | undefined; let lon: number | undefined; let accuracy: number | undefined;
+    let locStatus: "granted" | "denied" | "unavailable" | "timeout" | "unsupported" = "denied";
     if (withGps) {
       const geo = await getLocation();
+      locStatus = geo.status;
       if (geo.status === "granted") { lat = geo.reading.latitude; lon = geo.reading.longitude; accuracy = geo.reading.accuracyM; }
     }
     let next = tokens.reduce((acc, token) => upsertBulk(acc, token, "pending"), [] as BulkItem[]);
     setItems(next);
     for (const token of tokens) {
       try {
-        const res = await recordCustody({ action, token, locationId: chosen, idem: keyFor(token), note, lat, lon, accuracy });
+        const res = await recordCustody({ action, token, locationId: chosen, idem: keyFor(token), note, lat, lon, accuracy, locStatus });
         const ok = res.result === "accepted";
-        next = upsertBulk(next, token, ok ? "ok" : "error", ok ? (res.replayed ? "Already recorded" : res.geofence) : res.reason);
+        next = upsertBulk(
+          next,
+          token,
+          ok ? "ok" : "error",
+          ok ? (res.replayed ? "Already recorded" : res.geofence) : (REASON_MSG[res.reason ?? ""] ?? res.reason ?? "rejected"),
+        );
       } catch (e) {
         next = upsertBulk(next, token, "error", e instanceof Error ? e.message : "failed");
       }
@@ -65,18 +83,25 @@ export default function VendorScan() {
     <div className="space-y-5 md:space-y-6">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight text-brand md:text-3xl">Scan</h1>
-        <p className="mt-1 text-sm text-slate-500 md:text-base">Point the camera at a QR code, or paste codes below.</p>
+        <p className="mt-1 text-sm text-slate-500 md:text-base">Point the camera at a QR code. You can also take a photo, or paste codes if needed.</p>
       </header>
 
       <div className="grid gap-5 lg:grid-cols-2 lg:items-start lg:gap-8">
-        <QrCamera onCode={(value) => setRaw((prev) => prev ? `${prev}\n${value}` : value)} />
+        <QrCamera
+          continuous
+          onCode={(value) => setRaw((prev) => {
+            const lines = prev.split(/\s+/).filter(Boolean);
+            if (lines.includes(value)) return prev;
+            return prev ? `${prev}\n${value}` : value;
+          })}
+        />
 
         <section className="space-y-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5 md:p-6">
-          <Field label="Codes or links" hint="One per line. Links and raw tokens are accepted.">
+          <Field label="Codes ready to record" hint="Filled by the camera. Paste only if you cannot scan.">
             <Textarea value={raw} onChange={(e) => setRaw(e.target.value)} className="min-h-24 md:min-h-32" />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Action">
+            <Field label="Action" hint={ACTIONS.find((a) => a.id === action)?.hint}>
               <Select value={action} onChange={(e) => setAction(e.target.value)}>{ACTIONS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</Select>
             </Field>
             <Field label="Location" hint="Only locations assigned to you.">
@@ -92,8 +117,9 @@ export default function VendorScan() {
           )}
           <label className="flex min-h-11 items-center gap-3 rounded-xl bg-slate-50 px-3 text-sm text-slate-700">
             <input type="checkbox" className="size-4 accent-[var(--color-brand)]" checked={withGps} onChange={(e) => setWithGps(e.target.checked)} />
-            Include this device&apos;s location
+            Include this device&apos;s GPS location
           </label>
+          {!withGps && <p className="text-xs text-amber-800">Without GPS, My scans will show “No GPS (permission not shared)” for this record. The receive itself can still succeed.</p>}
           <p className="text-xs text-slate-500">
             {tokens.length} code{tokens.length === 1 ? "" : "s"} ready. Retries keep the same key so a unit is not recorded twice.
           </p>
